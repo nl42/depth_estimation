@@ -21,4 +21,4 @@ Enter existing container
 Open terminal in VSCode container this <this may be different on you pc>
     ctrl + shift + ' or or ~ or @ or #
 
-    
+    some new line

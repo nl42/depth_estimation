@@ -7,16 +7,17 @@
 
 # Depth Features
 
-1. ### texture variation
-    - extracted from image intensity:
-        - using Laws' masks      
-1. ### texture gradient
-    - Combine:
-        - intensity channel 
-        - six oriented edge filters
-1. ### haze
-    - local averaging filter:
-        - colour channels
+Convert the image from RGB/BGR to YCrCb:
+    1. Y: Intensity
+    1. Cr: red difference
+    1. Cb: blue difference
+
+1. ### texture variation [9 channels]
+    - Apply 9 Law's masks to Y    
+1. ### texture gradient [6 channels]:
+    - Apply 6 edge filters to Y
+1. ### haze [2 channels]:
+    - Apply 1st Law's Mask to Cr,Cb
 1. ### fog (not implemented)
     - light scattering
 

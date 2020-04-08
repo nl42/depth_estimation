@@ -18,6 +18,16 @@ def show_img(im, ax=None, figsize=(8,8)):
     ax.yaxis.set_visible(False)
     return ax
 
+
+def array_of_images(images, width, height, figsize=(16,16)):
+    _,ax = plt.subplots(height, width, figsize=figsize)
+
+    for index, image in enumerate(images):
+        if image.dtype == 'float64':
+            image = cv2.normalize(image, None, 0, 1, cv2.NORM_MINMAX)
+        show_img(image, ax[int(index/width)][index%width])
+
+
 def import_raw_colour_image(path):
     with open(path, 'rb') as f:
         buffer = f.read()

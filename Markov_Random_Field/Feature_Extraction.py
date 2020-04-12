@@ -84,7 +84,7 @@ def get_thresholds(patch, sigma=0.33):
     lower = int(max(0, (1.0 - sigma) * v))
     upper = int(min(255, (1.0 - sigma) * v))
 
-def create_feature_vector(patch):
+def create_local_feature_vector(patch):
     vector = []
     y, cr, cb = cv2.split(cv2.cvtColor(patch, cv2.COLOR_BGR2YCrCb))
     
@@ -95,24 +95,31 @@ def create_feature_vector(patch):
 
     return [np.sum(feature) for feature in vector]
 
-def process_patches(image, patchsize, function=lambda x: x, stride=None):
+def process_patches(image, patchsize, order=None, override=False, function=lambda x: x, stride=None):
     if stride is None:
         stride = patchsize
     
-    vector = function(image)
-    shape = image.shape[:2]
-    shape += (len(vector),) if isinstance(vector, list) else ()
+    if order = None:
+        heights = [y for y in range(0, image.shape[0]+1, stride[0])]
+        widths = [x for x in range(0, image.shape[1]+1, stride[1])]
+    else:
+        heights , widths = zip*([(stride[0]*height, stride[1]*width)
+                                 for height, width in order])
+
+    if override:
+        for y_0, y_1 in tqdm(zip(heights, heights[1:]), 
+                            total=len(heights)-1, leave=False):
+            for x_0, x_1 in zip(widths, widths[1:]):
+                function(image[y_0:y_1, x_0:x_1])
+    else:
+        target = np.zeros((*image.shape[0:2],*np.array(function(image)).shape))
+
+        for y_0, y_1 in tqdm(zip(heights, heights[1:]), 
+                            total=len(heights)-1, leave=False):
+            for x_0, x_1 in zip(widths, widths[1:]):
+                target[y_0:y_1, x_0:x_1] = np.array(function(image[y_0:y_1, x_0:x_1]))
     
-    patches = np.zeros(shape)
-    heights = [y for y in range(0, image.shape[0]+1, stride[0])]
-    widths = [x for x in range(0, image.shape[1]+1, stride[1])]
-    
-    for y_0, y_1 in tqdm(zip(heights, heights[1:]), 
-                         total=len(heights)-1, leave=False):
-        for x_0, x_1 in zip(widths, widths[1:]):
-            patches[y_0:y_1, x_0:x_1] = np.array(function(image[y_0:y_1, x_0:x_1]))
-    
-    return np.array(patches)
+        return target
 
 def nxm_patches(image, nxm, *args, **kwargs):
     height = int(image.shape[0] / nxm[0])

@@ -10,7 +10,6 @@ def show_img(image, title='', axis=None, heatmap=False, depthmap=False, figsize=
     if image.dtype != np.uint8:
         image = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         
-    
     if len(image.shape)==3: image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     elif heatmap:
         image = cv2.applyColorMap(255-image, cv2.COLORMAP_JET)

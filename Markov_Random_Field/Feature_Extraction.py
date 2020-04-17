@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import math
 from scipy import ndimage
-from tqdm.notebook import tqdm
+from tqdm.notebook import trange
 
 import sys
 sys.path.append('../')
@@ -84,52 +84,75 @@ def get_thresholds(patch, sigma=0.33):
     lower = int(max(0, (1.0 - sigma) * v))
     upper = int(min(255, (1.0 - sigma) * v))
 
-def create_local_feature_vector(patch):
+def create_local_feature_vector(patch, squares=True, function=np.sum):
     vector = []
     y, cr, cb = cv2.split(cv2.cvtColor(patch, cv2.COLOR_BGR2YCrCb))
     
     vector = texture_variation(y) 
     vector += haze(cr, cb)
     vector += texture_gradients(y, step=30)
+
+    if not squares:
+        return np.array([function(feature) for feature in vector])
+
     vector += [feature**2 for feature in vector]
 
-    return [np.sum(feature) for feature in vector]
+    return np.array([function(feature) for feature in vector])
 
-def process_patches(image, patchsize, override=False,
-                    function=lambda x: x, stride=None, name=''):
-    if stride is None:
-        stride = patchsize
+def get_patchsize(image_shape, patchsize):
+    if isinstance(patchsize, int):
+        patchsize = [patchsize,patchsize]
+    else:
+        patchsize = list(patchsize)
+
+    while image_shape[0] % patchsize[0] > 0:
+        patchsize[0] -= 1
+        if image_shape[1] % patchsize[1] > 0:
+            patchsize[1] -= 1
     
-    # if order is None:
-        heights = [y for y in range(0, image.shape[0]+1, stride[0])]
-        widths = [x for x in range(0, image.shape[1]+1, stride[1])]
-    # else:
+    while image_shape[1] % patchsize[1] > 0:
+        patchsize[1] += 1
+    
+    return patchsize
+
+def process_patches(image, patchsize, function=lambda x: x, name=''):
+    patchsize = get_patchsize(image.shape, patchsize)
+
+    nxm = [int(i_dim / p_dim) for i_dim, p_dim in zip(image.shape, patchsize)]
+    
+    # Currently we get the shape by quickly running the function on the whole image, should be improved
+    patches = np.zeros((*nxm,*np.array(function(image)).shape))
+    
+    for y in trange(nxm[0], leave=False, desc=name):
+        for x in range(nxm[1]):
+            patches[y, x] = np.array(function(image[y*patchsize[0]:(y+1)*patchsize[0], x*patchsize[1]:(x+1)*patchsize[1]]))
+    
+    return patches
+
+def image_from_patches(patches, patchsize):
+    image = np.zeros((patches.shape[0]*patchsize[0], patches.shape[1]*patchsize[1], *patches.shape[2:]))
+    
+    patchsize = (int(image.shape[0] / patches.shape[0]), int(image.shape[1] / patches.shape[1]))
+    
+    for y in trange(patches.shape[0], leave=False):
+        for x in range(patches.shape[1]):
+            image[y*patchsize[0]:(y+1)*patchsize[0], x*patchsize[1]:(x+1)*patchsize[1]] = patches[y, x]
+    
+    return image
+
+
+# else:
     #     heights , widths = zip*([(stride[0]*height, stride[1]*width)
     #                              for height, width in order])
 
-    if override:
-        for y_0, y_1 in tqdm(zip(heights, heights[1:]), 
-                            total=len(heights)-1, leave=False, desc=name):
-            for x_0, x_1 in zip(widths, widths[1:]):
-                function(image[y_0:y_1, x_0:x_1])
-    # elif override:
+    # if override:
     #     for y_0, y_1 in tqdm(zip(heights, heights[1:]), 
     #                         total=len(heights)-1, leave=False, desc=name):
     #         for x_0, x_1 in zip(widths, widths[1:]):
-    #             function(image[y_0:y_1, x_0:x_1],
-    #                      target[y_0:y_1, x_0:x_1])
-    else:
-        target = np.zeros((*image.shape[0:2],*np.array(function(image)).shape))
-
-        for y_0, y_1 in tqdm(zip(heights, heights[1:]), 
-                            total=len(heights)-1, leave=False, desc=name):
-            for x_0, x_1 in zip(widths, widths[1:]):
-                target[y_0:y_1, x_0:x_1] = np.array(function(image[y_0:y_1, x_0:x_1]))
-    
-        return target
-
-def nxm_patches(image, nxm, *args, **kwargs):
-    height = int(image.shape[0] / nxm[0])
-    width = int(image.shape[1] / nxm[1])
-    
-    return process_patches(image, (height, width), *args, **kwargs)
+    #             function(image[y_0:y_1, x_0:x_1])
+    # # elif override:
+    # #     for y_0, y_1 in tqdm(zip(heights, heights[1:]), 
+    # #                         total=len(heights)-1, leave=False, desc=name):
+    # #         for x_0, x_1 in zip(widths, widths[1:]):
+    # #             function(image[y_0:y_1, x_0:x_1],
+    # #                      target[y_0:y_1, x_0:x_1])

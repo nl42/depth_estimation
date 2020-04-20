@@ -2,10 +2,13 @@ import cv2
 import numpy as np
 import math
 from scipy import ndimage
-from tqdm.notebook import trange
+from tqdm.notebook import tqdm,trange
 
 import sys
 sys.path.append('../')
+
+
+from depth_Functions import show_array_of_images, show_img
 
 filters = [
                 np.array([1, 4, 6, 4, 1]),
@@ -14,8 +17,6 @@ filters = [
                 np.array([1, -4, 6, -4, 1])
                ] 
 def mask(patch, first, second=None):
-    
-    
     if second is None:
         return cv2.filter2D(patch, -1, filters[first].reshape(5,1)*filters[first])
     else:
@@ -41,7 +42,6 @@ def texture_variation(patch_intensity):
     return masks
 
 def haze(cr, cb):
-    
     return [mask(cr, 0, 1), mask(cb, 0, 1)]
 
 def create_kernels(step=90, min=0, max=180):
@@ -68,7 +68,6 @@ def denoise(patch, size=5, sigma=1):
 
 def texture_gradients(patch, *args, **kwargs):
     kernels = create_kernels(*args, **kwargs)
-    gausian = denoise(patch)
     gradients = []
     
     for kernel in kernels:
@@ -84,10 +83,11 @@ def get_thresholds(patch, sigma=0.33):
     lower = int(max(0, (1.0 - sigma) * v))
     upper = int(min(255, (1.0 - sigma) * v))
 
+    return lower, upper
+
 def create_local_feature_vector(patch, squares=True, function=np.sum):
+    y, cr, cb = cv2.split(patch)
     vector = []
-    y, cr, cb = cv2.split(cv2.cvtColor(patch, cv2.COLOR_BGR2YCrCb))
-    
     vector = texture_variation(y) 
     vector += haze(cr, cb)
     vector += texture_gradients(y, step=30)
@@ -98,61 +98,6 @@ def create_local_feature_vector(patch, squares=True, function=np.sum):
     vector += [feature**2 for feature in vector]
 
     return np.array([function(feature) for feature in vector])
-
-def get_patchsize(image_shape, patchsize):
-    if isinstance(patchsize, int):
-        patchsize = [patchsize,patchsize]
-    else:
-        patchsize = list(patchsize)
-
-    while image_shape[0] % patchsize[0] > 0:
-        patchsize[0] -= 1
-        if image_shape[1] % patchsize[1] > 0:
-            patchsize[1] -= 1
-    
-    while image_shape[1] % patchsize[1] > 0:
-        patchsize[1] += 1
-    
-    return patchsize
-
-def process_patches(image, patchsize, function=lambda x: x, name=''):
-    patchsize = get_patchsize(image.shape, patchsize)
-
-    nxm = [int(i_dim / p_dim) for i_dim, p_dim in zip(image.shape, patchsize)]
-    
-    # Currently we get the shape by quickly running the function on the whole image, should be improved
-    patches = np.zeros((*nxm,*np.array(function(image)).shape))
-    
-    for y in trange(nxm[0], leave=False, desc=name):
-        for x in range(nxm[1]):
-            patches[y, x] = np.array(function(image[y*patchsize[0]:(y+1)*patchsize[0], x*patchsize[1]:(x+1)*patchsize[1]]))
-    
-    return patches
-
-def image_from_patches(patches, patchsize):
-    image = np.zeros((patches.shape[0]*patchsize[0], patches.shape[1]*patchsize[1], *patches.shape[2:]))
-    
-    patchsize = (int(image.shape[0] / patches.shape[0]), int(image.shape[1] / patches.shape[1]))
-    
-    for y in trange(patches.shape[0], leave=False):
-        for x in range(patches.shape[1]):
-            image[y*patchsize[0]:(y+1)*patchsize[0], x*patchsize[1]:(x+1)*patchsize[1]] = patches[y, x]
-    
-    return image
-
-
-# else:
-    #     heights , widths = zip*([(stride[0]*height, stride[1]*width)
-    #                              for height, width in order])
-
-    # if override:
-    #     for y_0, y_1 in tqdm(zip(heights, heights[1:]), 
-    #                         total=len(heights)-1, leave=False, desc=name):
-    #         for x_0, x_1 in zip(widths, widths[1:]):
-    #             function(image[y_0:y_1, x_0:x_1])
-    # # elif override:
-    # #     for y_0, y_1 in tqdm(zip(heights, heights[1:]), 
-    # #                         total=len(heights)-1, leave=False, desc=name):
-    # #         for x_0, x_1 in zip(widths, widths[1:]):
-    # #             function(image[y_0:y_1, x_0:x_1],
-    # #                      target[y_0:y_1, x_0:x_1])
+            
+            
+        

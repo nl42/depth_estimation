@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import math
 from scipy import ndimage
-from tqdm.notebook import tqdm
+from tqdm.notebook import trange, tqdm
 
 import sys
 sys.path.append('../')
@@ -14,10 +14,10 @@ from depth_Functions import (
 )
     
 from Feature_Extraction import (
-    get_patchsize,
-    process_patches, 
     create_local_feature_vector
 )
+
+from Patches import Patches
 
 def get_absolute_and_relative_depth(image, patchsize, scales):
     patchsize = get_patchsize(image.shape, patchsize)
@@ -92,28 +92,16 @@ def scaled_patch(patch, patchsize, scale, function, sub=False):
             subpatches.append(function(patch[start[0]:end[0], start[1]:end[1]]))
     return subpatches
 
-def set_adjacent(patches):
-    for y in range(0,patches.shape[0]-1):
-        for x in range(0,patches.shape[1]-1):
-            patches[y+1, x,   1] = patches[y,   x,   0]
-            patches[y,   x,   2] = patches[y,   x+1, 0]
-            patches[y,   x,   3] = patches[y+1, x,   0]
-            patches[y,   x+1, 4] = patches[y,   x,   0]
 
-def subtract_adjacent(patches):
-    for y in range(0,patches.shape[0]-1):
-        for x in range(0,patches.shape[1]-1):
-            patches[y+1, x,   1] = patches[y+1, x,   0] - patches[y,   x,   0]
-            patches[y,   x,   2] = patches[y,   x,   0] - patches[y,   x+1, 0]
-            patches[y,   x,   3] = patches[y,   x,   0] - patches[y+1, x,   0]
-            patches[y,   x+1, 4] = patches[y,   x+1, 0] - patches[y,   x,   0]
-    
-    return patches[:,:,1:]
 
-def create_feature_vector_with_neighbours(patch, *args, **kwargs):
-    local_feature_vector = create_local_feature_vector(patch, *args, **kwargs)
-    return [local_feature_vector for i in range(5)]
+# def create_global_feature_vector(patch, number_of_scales=1, *args, **kwargs):
+#     local_feature_vector = create_local_feature_vector(patch, *args, **kwargs)
+#     scale1 = np.array([local_feature_vector for i in range(5)])
+#     if number_of_scales ==1:
+#         return scale1
 
-def create_global_feature_vectors(patch, *args, **kwargs):
-    local_feature_vector = create_local_feature_vector(patch, * args, **kwargs)
-    return [local_feature_vector for i in range(9)]
+#     return 
+
+# # def create_global_feature_vector(patch, *args, **kwargs):
+# #     local_feature_vector = create_local_feature_vector(patch, * args, **kwargs)
+# #     return [local_feature_vector for i in range(9)]

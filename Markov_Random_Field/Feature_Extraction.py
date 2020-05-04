@@ -8,14 +8,18 @@ import sys
 sys.path.append('../')
 
 
-from depth_Functions import show_array_of_images, show_img
+from depth_Functions import (
+    show_array_of_images, 
+    show_img,
+    stand
+)
 
 filters = [
                 np.array([1, 4, 6, 4, 1]),
                 np.array([-1, -2, 0, 2, 1]),
                 np.array([-1, 0, 2, 0, -1]),
                 np.array([1, -4, 6, -4, 1])
-               ] 
+          ] 
 def mask(patch, first, second=None):
     if second is None:
         return cv2.filter2D(patch, -1, filters[first].reshape(5,1)*filters[first])
@@ -26,8 +30,7 @@ def mask(patch, first, second=None):
 
 def texture_variation(patch_intensity):
     level, edge, spot, ripple = 0, 1, 2, 3
-    
-    masks = [
+    masks =  [
                 mask(patch_intensity, level, edge),
                 mask(patch_intensity, level, ripple),
                 mask(patch_intensity, edge, spot),
@@ -85,6 +88,29 @@ def get_thresholds(patch, sigma=0.33):
 
     return lower, upper
 
+# def get_features(patch, function x : np.sum(x)):
+#     y, cr, cb = cv2.split(patch)
+#     vector = []
+#     vector = function(texture_variation(y))
+#     vector += function(haze(cr, cb))
+#     vector += function(texture_gradients(y, step=30))
+
+#     return vector
+
+# def create_feature_vector(patch, function):
+#     vector = get_features(patch)
+
+#     vector = [function(feature) for feature in vector]
+
+#     return vector
+
+# def sum_and_square_sums(vector):
+#     vector = [(v,v**2) for v in vector]
+#     return vector
+
+# def feature_histogram(vector, bins=11):
+#     return np.histogram(patch, bins=bins)[0]
+
 def create_local_feature_vector(patch, squares=True, function=np.sum):
     y, cr, cb = cv2.split(patch)
     vector = []
@@ -98,6 +124,27 @@ def create_local_feature_vector(patch, squares=True, function=np.sum):
     vector += [feature**2 for feature in vector]
 
     return np.array([function(feature) for feature in vector])
-            
-            
+
+
+def get_feature_vector(image):
+    y, cr, cb = cv2.split(image)
+    
+    vector = np.stack([*texture_variation(y),*haze(cr,cb),*texture_gradients(y, step=30)],axis=2)
         
+    return vector
+
+def get_features_with_squares(image):
+    y, cr, cb = cv2.split(image)
+    
+    vector = np.stack([*texture_variation(y),*haze(cr,cb),*texture_gradients(y, step=30)],axis=2)
+
+    return np.concatenate((vector, vector**2), axis=2)
+
+def get_squared_features(image):
+    y, cr, cb = cv2.split(image)
+    
+    vector = np.stack([*texture_variation(y),*haze(cr,cb),*texture_gradients(y, step=30)],axis=2)
+
+    vector = vector**2    
+    
+    return vector

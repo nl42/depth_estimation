@@ -23,7 +23,7 @@ class Laplacian():
         self.z = z
         self.weights = np.array(initial_weights) #.reshape((*initial_weights.shape,1))
         self.var_weights = np.array(initial_var_weights)
-        self.relative_weights = np.stack([initial_weights for i in range(4)],axis=0)
+        # self.relative_weights = np.stack([initial_weights for i in range(4)],axis=0)
         self.relative_var_weights = np.stack([initial_var_weights for i in range(4)],axis=0)
         self.local_function = local_function
         self.global_function = global_function
@@ -38,17 +38,32 @@ class Laplacian():
             features = patch.get_features()
             variance = self.__calc(self.__least_squares, -features, self.weights, np.log(labels))
             self.__calc(self.__least_squares, features, self.var_weights, variance, bounds=[0,np.inf], feature_function=lambda x : np.var(x, axis=(0,1)))
-            relative_features = relative(features)
-            relative_labels = relative(labels)
+            relative_features = calculate_relative(features)
+            relative_labels = calculate_relative(labels)
             # Tracer()()
-            relative_variances = [self.__calc(self.__least_squares, -relative_features[i], self.relative_weights[i], relative_labels[i], method=self.__partial_exponential_function)
-                                  for i in trange(self.relative_weights.shape[0])]
-            [self.__calc(self.__least_squares, relative_features[i], self.relative_var_weights[i], relative_variances[i], bounds=[0,np.inf], feature_function=lambda x : np.var(x, axis=(0,1)))
-             for i in trange(self.relative_var_weights.shape[0])]
+            # relative_variances = [self.__calc(self.__least_squares, features, weights, labels, method=self.__exponential_function)
+            #                       for relative_features, weights, labels in tqdm(zip(calculate_relative(features), self.relative_weights, relative_labels),
+            #                       total = 4, leave=False, desc='relative weights')]
             
-    def predict(self, image):
+            [self.__calc(self.__least_squares, features, weights, labels, bounds=[0,np.inf], feature_function=lambda x : np.var(x, axis=(0,1)), method=self.__exponential_function,)
+             for relative_features, weights, labels in tqdm(zip(calculate_relative(features), self.relative_var_weights, relative_variances),
+             total = 4, leave=False, desc='relative weights')]
+            
+    def predict(self, image, local=True, relative=True):
         features = self.create_patch(image).get_features()
-        return self.__calc(self.__full_exponential_function, features, self.weights, self.var_weights)
+        
+        if not relative:
+            return self.__calc(self.__local, features, self.weights)
+        
+        if not local:
+            return [self.__calc(self.__local, features, weights)
+                    for features, weights in zip(calculate_relative(features), self.relative_weights)]
+
+        e1 = self.__calc(self.__variance_weighting, features, self.weights, self.var_weights)
+        e2 = [self.__calc(self.__variance_weighting, features, weights, var_weights)
+              for features, weights, var_weights in zip(calculate_relative(features), self.relative_weights, self.relative_var_weights)]
+        # Tracer()()
+        return np.exp(e1 + np.mean(e2, axis=0))
 
     def __least_squares(self, features, weights, labels, bounds=(-np.inf,np.inf), feature_function=None, method=None):       
         if feature_function is not None:
@@ -57,17 +72,24 @@ class Laplacian():
         # features = features.reshape(-1,features.shape[-1])
         if method is None:
             method = self.__linear_function
-        params = curve_fit(method, features, labels.flatten(), p0=weights.flatten(), method='trf', bounds=bounds)
+        params = curve_fit(method, features, labels.flatten(), p0=weights.flatten(), method='trf', bounds=bounds, max_nfev=10**6)
         weights[:] = params[0].reshape(weights.shape)
         covariance = params[1]
         return np.diag(covariance)
 
-    def __full_exponential_function(self, features, weights, var_weights, relative_weights, relative_var_weights):
-        e1 = -features @ (weights * (np.var(features, axis=(0,1)) @ var_weights))
-        e2 = -relative(features) @ (relative_weights * (np.var(features, axis=(0,1)) @ relative_var_weights)) 
-        return np.exp()
+    # def __full_exponential_function(self, features, weights, var_weights, relative_weights, relative_var_weights):
+    #     e1 = -features @ (weights * (np.var(features, axis=(0,1)) @ var_weights))
+    #     relative_features = relative(features)
+    #     e2 = -relative_features @ (relative_weights * (np.var(features, axis=(0,1)) @ relative_var_weights)) 
+    #     return np.exp(e1 - e2)
 
-    def __partial_exponential_function(self, features, *weights):
+    def __variance_weighting(self, features, weights, var_weights):
+        return -1*features @ (weights * (np.var(features, axis=(0,1)) @ var_weights))
+
+    def __local(self, features, weights):
+        return np.exp(-features @ weights)
+
+    def __exponential_function(self, features, *weights):
         weights = np.array(weights).reshape(features.shape[-1],-1)
         return np.exp(features @ weights).flatten()
 
@@ -75,9 +97,9 @@ class Laplacian():
         weights = np.array(weights).reshape(features.shape[-1],-1)
         return (features @ weights).flatten()
     
-    def __transposed_linear_function(self, features, *weights):
-        # features = features.transpose()
-        return (weights @ features).flatten()
+    # def __transposed_linear_function(self, features, *weights):
+    #     # features = features.transpose()
+    #     return (weights @ features).flatten()
     
     def __calc(self, function, features, weights, *args, **kwargs):
         # Tracer()()
@@ -107,9 +129,10 @@ class Laplacian():
             return np.block(output)
         
     
-def relative(features):
-    up = np.diff(features, prepend=0, axis=1)
-    right = np.diff(features[::-1], prepend=0, axis=0)
-    down = left = np.diff(features[::-1], prepend=0, axis=1)
-    left = np.diff(features, prepend=0, axis=0)
+def calculate_relative(features, n=1):
+    [up, right, down, left] = [np.zeros(features.shape) for i in range(4)]
+    up[n:] = np.diff(features, n=n, axis=0)
+    right[:,:-n] = np.diff(features[::-1], n=n, axis=1)[::-1]
+    down[:-n] = np.diff(features[::-1], n=n, axis=0)[::-1]
+    left[:,n:] = np.diff(features, n=n, axis=1)
     return np.stack([up,right,down,left], axis=0)

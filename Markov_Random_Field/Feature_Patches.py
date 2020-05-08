@@ -32,6 +32,7 @@ class Patches():
         
         return np.append(self.local_features, self.global_features.reshape((*self.local_features.shape[0:-1],-1)), axis=-1)[...,None]
 
+    
     def calc_global_features(self, output=None, patchshapes=None, *args, **kwargs):
         if patchshapes is None:
             patchshapes = self.patchshapes

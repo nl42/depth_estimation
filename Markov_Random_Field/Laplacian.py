@@ -12,6 +12,7 @@ from scipy.odr import ODR, Data, Model
 
 import numpy as np
 import math
+from numpy import errstate,isneginf,array
 
 import cv2
 
@@ -19,11 +20,10 @@ from IPython.core.debugger import Tracer
 
 class Laplacian():
     def __init__(self, initial_weights, initial_var_weights, local_function, z=1, global_function=None, patchshapes=None):
-        #For weights of higher than 1D we require the additional dimension of size 1
         self.z = z
-        self.weights = np.array(initial_weights) #.reshape((*initial_weights.shape,1))
+        self.weights = np.array(initial_weights)
         self.var_weights = np.array(initial_var_weights)
-        # self.relative_weights = np.stack([initial_weights for i in range(4)],axis=0)
+        self.relative_weights = np.stack([initial_weights for i in range(4)],axis=0)
         self.relative_var_weights = np.stack([initial_var_weights for i in range(4)],axis=0)
         self.local_function = local_function
         self.global_function = global_function
@@ -48,7 +48,14 @@ class Laplacian():
             [self.__calc(self.__least_squares, features, weights, labels, bounds=[0,np.inf], feature_function=lambda x : np.var(x, axis=(0,1)), method=self.__exponential_function,)
              for relative_features, weights, labels in tqdm(zip(calculate_relative(features), self.relative_var_weights, relative_variances),
              total = 4, leave=False, desc='relative weights')]
-            
+    
+    def train_exp_linear(self, train_images, train_labels):
+        for image, labels in tqdm(zip(train_images, train_labels), total=len(train_images), leave=False):
+            patch = self.create_patch(image)
+            features = patch.get_features()
+            self.__calc(self.__least_squares, features, self.weights, np.log(labels), method=self.__linear_and_log)
+
+
     def predict(self, image, local=True, relative=True):
         features = self.create_patch(image).get_features()
         
@@ -64,6 +71,10 @@ class Laplacian():
               for features, weights, var_weights in zip(calculate_relative(features), self.relative_weights, self.relative_var_weights)]
         # Tracer()()
         return np.exp(e1 + np.mean(e2, axis=0))
+    
+    def predict_linear_and_exp(self, image):
+        features = self.create_patch(image).get_features()
+        return self.__calc(self.__combined, features, self.weights)
 
     def __least_squares(self, features, weights, labels, bounds=(-np.inf,np.inf), feature_function=None, method=None):       
         if feature_function is not None:
@@ -97,6 +108,14 @@ class Laplacian():
         weights = np.array(weights).reshape(features.shape[-1],-1)
         return (features @ weights).flatten()
     
+    def __linear_and_log(self, features, *weights):
+        linear = np.array(weights[:len(weights)//2]).reshape(features.shape[-1],-1)
+        exp = np.array(weights[len(weights)//2:]).reshape(features.shape[-1],-1)
+        return ((features @ linear) + np.log(-features @ exp)).flatten()
+    
+    def __combined(self, features, linear, exp):
+        return ((features @ linear) + np.exp(-features @ exp)).flatten()
+
     # def __transposed_linear_function(self, features, *weights):
     #     # features = features.transpose()
     #     return (weights @ features).flatten()

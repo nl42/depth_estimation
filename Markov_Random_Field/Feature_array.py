@@ -10,12 +10,14 @@ from depth_Functions import (
     stand
 )
 
-class Patches():
-    def __init__(self, image, local_function, global_function=None, patchshapes=[], convert=None, dtype = np.float64, *args, **kwargs):
+class Feature_array():
+    def __init__(self, image, local_function, global_function=None, patchshapes=[], blur=True, convert=None, dtype = np.float64, show=False, *args, **kwargs):
         if convert is None:
             self.image = image
         else :
-            self.image = cv2.cvtColor(cv2.GaussianBlur(image, (5, 5), 0), convert)
+            self.image = cv2.cvtColor(image, convert)
+        if blur:
+            image = cv2.GaussianBlur(image, (5, 5), 0)
         
         self.local_function = local_function
         self.local_features = local_function(image)
@@ -23,7 +25,7 @@ class Patches():
         self.patchshapes = patchshapes
         self.global_function = global_function
         self.global_features = None
-    
+
     def get_features(self):
         if self.global_function is None:
             return self.local_features
@@ -110,54 +112,12 @@ class Patches():
             patchshape[1] += 1
         
         return patchshape
-        
-
-    def extend(shape):
-        for (axis, repeats) in enumerate(shape):
-            if repeats > 1:
-                self.patches.repeat(repeats, axis=2+axis)
-
-    def get(self, attribute_names, shape, axis=0):
-        
-        attributes = [getattr(self, name).reshape(shape) for name in attribute_names]
-
-        return np.concatenate(attributes, axis=0)
     
     def get_absolute_and_relative(self, *args, **kwargs):
         return (get(['patches','columns'], *args, **kwargs), get(['relative'], *args, **kwargs))
 
-    def show(self, target='features', bordersize=0, subborder=(0,0), dims=[0], neighbours=[0], channels=None, *args, **kwargs):
-        patches = getattr(self, target)
-        patchshape = (self.image.shape[0]//patches.shape[0], self.image.shape[1]//patches.shape[1])
-        output = patches.repeat(patchshape[0], 0).repeat(patchshape[1], 1)
-        
-        if bordersize != 0:
-            for y in range(0,output.shape[0]+1,patchshape[0]):
-                output[y-bordersize:y,:] = 0
-                output[y:y+bordersize,:] = 0
-            
-            for x in range(0,output.shape[1]+1,patchshape[1]):
-                output[:,x-bordersize:x] = 0
-                output[:,x:x+bordersize] = 0
-        
-        if subborder != (0,0):
-            for y in range(0,output.shape[0]+1,subborder[0]*patchshape[0]):
-                output[y-bordersize:y+bordersize,:] = 255
-            
-            for x in range(0,output.shape[1]+1,subborder[1]*patchshape[1]):
-                output[:,x-bordersize:x+bordersize] = 255
-
-        # If you want an image for every instance of an axis, set it to None
+    def show_local_features(self, channels=None, *args, **kwargs):
         if channels is None:
-            channels = range(output.shape[-1])
-        if dims is None:
-            dims = range(output.shape[2])
-        if neighbours is None:
-            neighbours = range(output.shape[3])
+            channels = [i for i in range(self.local_features.shape[-1])]
 
-        if len(output.shape) == 5:
-            outputs = [output[:,:,d,n,c] for d,n,c in product(dims, neighbours, channels)]
-        elif len(output.shape) == 3:
-            outputs = [output[:,:,c] for c in channels]
-
-        show_array_of_images(outputs, *args, **kwargs)
+        show_array_of_images([self.local_features[...,c] for c in channels], *args, **kwargs)

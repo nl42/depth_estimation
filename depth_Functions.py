@@ -8,12 +8,11 @@ from inspect import getsource
 from sklearn.preprocessing import StandardScaler
 from IPython.display import Code
 
-def show_img(image, title='', axis=None, heatmap=False, depthmap=False, figsize=(8,8)):
+def show_img(image, title='', axis=None, heatmap=False, depthmap=False, figsize=(8,16)):
     if axis is None:
         _,axis = plt.subplots(1,1,figsize=figsize[::-1])
 
     if image.dtype != np.uint8:
-        image[image>1] = 1
         image = cv2.normalize(image, None, 0, 255, 32).astype(np.uint8)
         
     if image.shape[-1]==3: image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -31,7 +30,7 @@ def show_img(image, title='', axis=None, heatmap=False, depthmap=False, figsize=
     return axis
 
 def show_array_of_images(images, split_channels=False, image_array_shape=None, 
-                         figsize=(8,16), titles=[], *args, **kwargs):
+                         figsize=(16,32), titles=[], *args, **kwargs):
     if hasattr(images, 'shape'):
         print('for now only show lists of images')
         return
@@ -47,7 +46,7 @@ def show_array_of_images(images, split_channels=False, image_array_shape=None,
         if image_array_shape is None:
             if len(images) > 2:
                 sqrt = math.ceil(math.sqrt(len(images)))
-                image_array_shape = (sqrt, sqrt)
+                image_array_shape = (sqrt, math.ceil(len(images)/sqrt))
             else :
                 image_array_shape = (len(images),1)
     

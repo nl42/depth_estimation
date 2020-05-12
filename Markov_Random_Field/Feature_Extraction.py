@@ -20,76 +20,110 @@ filters = [
                 np.array([-1, 0, 2, 0, -1]),
                 np.array([1, -4, 6, -4, 1])
           ] 
-def mask(patch, first, second=None):
+
+titles = [
+                'Laws mask 1: Intensity',
+                'Laws mask 2: Intensity',
+                'Laws mask 3: Intensity',
+                'Laws mask 4: Intensity',
+                'Laws mask 5: Intensity',
+                'Laws mask 6: Intensity',
+                'Laws mask 7: Intensity',
+                'Laws mask 8: Intensity',
+                'Laws mask 9: Intensity',
+                'Laws mask 1: Relative Red',
+                'Laws mask 1: Relative Blue',
+                'Gradient: 0',
+                'Gradient: 30',
+                'Gradient: 60',
+                'Gradient: 90',
+                'Gradient: 120',
+                'Gradient: 150'
+]
+def mask(image, first, second=None):
     if second is None:
-        return cv2.filter2D(patch, -1, filters[first].reshape(5,1)*filters[first])
+        return cv2.filter2D(image, -1, filters[first].reshape(5,1)*filters[first])
     else:
-        filter1 = cv2.filter2D(patch, -1, filters[first].reshape(5,1)*filters[second])
-        filter2 = cv2.filter2D(patch, -1, filters[second].reshape(5,1)*filters[first])
+        filter1 = cv2.filter2D(image, -1, filters[first].reshape(5,1)*filters[second])
+        filter2 = cv2.filter2D(image, -1, filters[second].reshape(5,1)*filters[first])
         return (filter1 + filter2)/2
 
-def texture_variation(patch_intensity):
+def texture_variation(image_intensity):
     level, edge, spot, ripple = 0, 1, 2, 3
     masks =  [
-                mask(patch_intensity, level, edge),
-                mask(patch_intensity, level, ripple),
-                mask(patch_intensity, edge, spot),
-                mask(patch_intensity, spot),
-                mask(patch_intensity, ripple),
-                mask(patch_intensity, level, spot),
-                mask(patch_intensity, edge),
-                mask(patch_intensity, edge, ripple),
-                mask(patch_intensity, spot, ripple),
+                mask(image_intensity, level, edge),
+                mask(image_intensity, level, ripple),
+                mask(image_intensity, edge, spot),
+                mask(image_intensity, spot),
+                mask(image_intensity, ripple),
+                mask(image_intensity, level, spot),
+                mask(image_intensity, edge),
+                mask(image_intensity, edge, ripple),
+                mask(image_intensity, spot, ripple),
              ]
     
-    return masks
+    return np.array(masks)
 
 def haze(cr, cb):
-    return [mask(cr, 0, 1), mask(cb, 0, 1)]
+    return np.array([mask(cr, 0, 1), mask(cb, 0, 1)])
 
 def create_kernels(step=90, min=0, max=180):
     kernels = []
     
     for angle in range(min,max,step):
         rad = math.radians(angle)
-        cos = round(math.cos(rad),2)
-        sin = round(math.sin(rad),2)
+        cos = math.cos(rad)
+        sin = math.sin(rad)
+        cos = round(cos*abs(cos),2)
+        sin = round(sin*abs(sin),2)
         kernels.append(np.array([
-                                    [sin-cos,   2*sin, cos+sin],
+                                    [sin-cos, 2*sin, sin+cos],
                                     [-2*cos,        0,   2*cos],
                                     [-sin-cos, -2*sin, cos-sin] 
                                 ]))
-    
+        
     return kernels
 
-def denoise(patch, size=5, sigma=1):
-    size = int(size) // 2
-    x, y = np.mgrid[-size:size+1, -size:size+1]
-    normal = 1 / (2.0 * np.pi * sigma**2)
-    g_kernel =  np.exp(-((x**2 + y**2) / (2.0*sigma**2))) * normal
-    return ndimage.filters.convolve(patch, g_kernel)
+#[OpenCV canny edge detection](https://github.com/opencv/opencv/blob/master/modules/imgproc/src/canny.cpp) is predetermined to combine vertical and horizontal edge detection with no means to input custom kernels. So use our own implementation, 
+# [based on a tutorial by towards datascience](https://towardsdatascience.com/canny-edge-detection-step-by-step-in-python-computer-vision-b49c3a2d8123).
 
-def texture_gradients(patch, *args, **kwargs):
-    kernels = create_kernels(*args, **kwargs)
-    gradients = []
+# def texture_gradients(image, *args, **kwargs):
+#     kernels = create_kernels(*args, **kwargs)
+#     gradients = []
     
-    for kernel in kernels:
-        gradients.append(ndimage.filters.convolve(patch, kernel))
+#     for kernel in kernels:
+#         gradients.append(cv2.filter2D(image, -1, kernel))
         
-    return gradients
+#     return gradients
+
+def texture_gradients(image, d_angle):
+    gradX = cv2.Sobel(image, ddepth=cv2.CV_32F, dx=1, dy=0) # reveal vertical edges
+    gradY = cv2.Sobel(image, ddepth=cv2.CV_32F, dx=0, dy=1) # reveal horizontal edges
+
+    grad = cv2.convertScaleAbs(np.sqrt(gradX**2 + gradY**2))
+    angles = np.mod(np.arctan(gradY/(gradX+1e-10)) * 180/np.pi + 180, 180)  # mod() for unsigned gradients 
+
+    gradients = np.zeros((180//d_angle,*grad.shape))
+
+    for y in range(len(grad)):
+        for x in range(len(grad[y])):
+            i = int(angles[y,x]/d_angle)
+            gradients[i,y,x] = grad[y,x]
     
+    return gradients
+
 # For if we implement thresholds:
 # https://www.pyimagesearch.com/2015/04/06/zero-parameter-automatic-canny-edge-detection-with-python-and-opencv/
-def get_thresholds(patch, sigma=0.33):
-    v = np.median(patch)
+def calc_thresholds(image, sigma=0.33):
+    v = np.median(image)
     
     lower = int(max(0, (1.0 - sigma) * v))
     upper = int(min(255, (1.0 - sigma) * v))
 
     return lower, upper
 
-# def get_features(patch, function x : np.sum(x)):
-#     y, cr, cb = cv2.split(patch)
+# def get_features(image, function x : np.sum(x)):
+#     y, cr, cb = cv2.split(image)
 #     vector = []
 #     vector = function(texture_variation(y))
 #     vector += function(haze(cr, cb))
@@ -97,8 +131,8 @@ def get_thresholds(patch, sigma=0.33):
 
 #     return vector
 
-# def create_feature_vector(patch, function):
-#     vector = get_features(patch)
+# def create_feature_vector(image, function):
+#     vector = get_features(image)
 
 #     vector = [function(feature) for feature in vector]
 
@@ -109,14 +143,14 @@ def get_thresholds(patch, sigma=0.33):
 #     return vector
 
 # def feature_histogram(vector, bins=11):
-#     return np.histogram(patch, bins=bins)[0]
+#     return np.histogram(image, bins=bins)[0]
 
-def create_local_feature_vector(patch, squares=True, function=np.sum):
-    y, cr, cb = cv2.split(patch)
+def create_patch_local_feature_vector(image, squares=True, function=np.sum):
+    y, cr, cb = cv2.split(image)
     vector = []
     vector = texture_variation(y) 
     vector += haze(cr, cb)
-    vector += texture_gradients(y, step=30)
+    vector += [*texture_gradients(y, 30)]
 
     if not squares:
         return np.array([function(feature) for feature in vector])
@@ -126,25 +160,12 @@ def create_local_feature_vector(patch, squares=True, function=np.sum):
     return np.array([function(feature) for feature in vector])
 
 
-def get_feature_vector(image):
+def create_local_feature_vector(image, squares=True):
     y, cr, cb = cv2.split(image)
     
-    vector = np.stack([*texture_variation(y),*haze(cr,cb),*texture_gradients(y, step=30)],axis=2)
-        
-    return vector
-
-def get_features_with_squares(image):
-    y, cr, cb = cv2.split(image)
+    vector = np.stack([*texture_variation(y),*haze(cr,cb),*texture_gradients(y, 30)],axis=2)
     
-    vector = np.stack([*texture_variation(y),*haze(cr,cb),*texture_gradients(y, step=30)],axis=2)
+    if squares:
+        vector = np.concatenate((vector, vector**2), axis=2)
 
-    return np.concatenate((vector, vector**2), axis=2)
-
-def get_squared_features(image):
-    y, cr, cb = cv2.split(image)
-    
-    vector = np.stack([*texture_variation(y),*haze(cr,cb),*texture_gradients(y, step=30)],axis=2)
-
-    vector = vector**2    
-    
     return vector

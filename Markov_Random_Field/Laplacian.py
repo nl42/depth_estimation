@@ -2,7 +2,7 @@ from scipy.optimize import curve_fit
 
 from Feature_Extraction import create_local_feature_vector
 
-from Feature_Patches import Patches
+from Feature_array import Feature_array
 
 from IPython.display import clear_output
 
@@ -16,142 +16,73 @@ from numpy import errstate,isneginf,array
 
 import cv2
 
+from depth_Functions import updating_mean, stand
+
+from functools import partial
+
 from IPython.core.debugger import Tracer
 
 class Laplacian():
-    def __init__(self, initial_weights, initial_var_weights, local_function, z=1, global_function=None, patchshapes=None):
-        self.z = z
-        self.weights = np.array(initial_weights)
-        self.var_weights = np.array(initial_var_weights)
-        self.relative_weights = np.stack([initial_weights for i in range(4)],axis=0)
-        self.relative_var_weights = np.stack([initial_var_weights for i in range(4)],axis=0)
+    def __init__(self, initial_weights, local_function):
+        self.initial_weights = np.array(initial_weights)
         self.local_function = local_function
-        self.global_function = global_function
-        self.patchshapes = patchshapes
+        self.training_count=0
+        self.weights = np.ones(initial_weights.shape)
 
-    def create_patch(self, image):
-        return Patches(image, convert=cv2.COLOR_BGR2YCrCb, local_function=self.local_function, global_function=self.global_function, patchshapes=self.patchshapes)
+    def calc_features(self, image):
+        return Feature_array(image, convert=cv2.COLOR_BGR2YCrCb, local_function=self.local_function)
 
-    def train(self, train_images, train_labels):
+    def train_combined(self, train_images, train_labels, *args, **kwargs):
+        combined_train_image = np.concatenate(train_images,axis=1)
+        combined_train_labels = np.concatenate(train_labels,axis=1)
+        self.train([combined_train_image], [combined_train_labels], *args, **kwargs)
+
+    def train(self, train_images, train_labels, function=None, prep=np.log, conc_function=updating_mean):
+        if function is None:
+            function = self.linear_function
+        # if prep is not None:
+        # train_labels = prep(train_labels)
+        function = partial(self.__train_function, function)
+        training_weights = []
         for image, labels in tqdm(zip(train_images, train_labels), total=len(train_images), leave=False):
-            patch = self.create_patch(image)
-            features = patch.get_features()
-            variance = self.__calc(self.__least_squares, -features, self.weights, np.log(labels))
-            self.__calc(self.__least_squares, features, self.var_weights, variance, bounds=[0,np.inf], feature_function=lambda x : np.var(x, axis=(0,1)))
-            relative_features = calculate_relative(features)
-            relative_labels = calculate_relative(labels)
+            features_array = self.calc_features(image)
+            if prep is not None:
+                labels = prep(labels)
             # Tracer()()
-            # relative_variances = [self.__calc(self.__least_squares, features, weights, labels, method=self.__exponential_function)
-            #                       for relative_features, weights, labels in tqdm(zip(calculate_relative(features), self.relative_weights, relative_labels),
-            #                       total = 4, leave=False, desc='relative weights')]
-            
-            [self.__calc(self.__least_squares, features, weights, labels, bounds=[0,np.inf], feature_function=lambda x : np.var(x, axis=(0,1)), method=self.__exponential_function,)
-             for relative_features, weights, labels in tqdm(zip(calculate_relative(features), self.relative_var_weights, relative_variances),
-             total = 4, leave=False, desc='relative weights')]
+            weights, covariance = zip(*[curve_fit(function, partial_features, partial_labels.flatten(), p0=partial_weights.flatten()) 
+                                   for partial_features, partial_weights, partial_labels in tqdm(features_array.feature_iter(self.initial_weights, labels),
+                                   total=self.weights.shape[0], leave=False, desc='local weights')])
+            # self.weights = np.array(weights)
+            conc_function(self.weights, weights, self.training_count)
+            # training_weights.append(np.array(weights))
+            self.training_count += 1
     
-    def train_exp_linear(self, train_images, train_labels):
-        for image, labels in tqdm(zip(train_images, train_labels), total=len(train_images), leave=False):
-            patch = self.create_patch(image)
-            features = patch.get_features()
-            self.__calc(self.__least_squares, features, self.weights, np.log(labels), method=self.__linear_and_log)
+        # self.weights = np.mean(np.stack(training_weights),axis=0)
 
+    def post(image, minmax):
+        return cv2.normalize(image, None, *minmax, cv2.NORM_MINMAX)
 
-    def predict(self, image, local=True, relative=True):
-        features = self.create_patch(image).get_features()
+    def predict(self, image, function=None, post=None, *args):
+        if function is None:
+            function = self.exponential_function
         
-        if not relative:
-            return self.__calc(self.__local, features, self.weights)
+        feature_array = self.calc_features(image) 
+        prediction = np.concatenate([function(features, weights) for features, weights in feature_array.feature_iter(self.weights)])
         
-        if not local:
-            return [self.__calc(self.__local, features, weights)
-                    for features, weights in zip(calculate_relative(features), self.relative_weights)]
+        prediction[prediction>1] = 1
 
-        e1 = self.__calc(self.__variance_weighting, features, self.weights, self.var_weights)
-        e2 = [self.__calc(self.__variance_weighting, features, weights, var_weights)
-              for features, weights, var_weights in zip(calculate_relative(features), self.relative_weights, self.relative_var_weights)]
-        # Tracer()()
-        return np.exp(e1 + np.mean(e2, axis=0))
-    
-    def predict_linear_and_exp(self, image):
-        features = self.create_patch(image).get_features()
-        return self.__calc(self.__combined, features, self.weights)
-
-    def __least_squares(self, features, weights, labels, bounds=(-np.inf,np.inf), feature_function=None, method=None):       
-        if feature_function is not None:
-            # Tracer()()
-            features = feature_function(features)
-        # features = features.reshape(-1,features.shape[-1])
-        if method is None:
-            method = self.__linear_function
-        params = curve_fit(method, features, labels.flatten(), p0=weights.flatten(), method='trf', bounds=bounds, max_nfev=10**6)
-        weights[:] = params[0].reshape(weights.shape)
-        covariance = params[1]
-        return np.diag(covariance)
-
-    # def __full_exponential_function(self, features, weights, var_weights, relative_weights, relative_var_weights):
-    #     e1 = -features @ (weights * (np.var(features, axis=(0,1)) @ var_weights))
-    #     relative_features = relative(features)
-    #     e2 = -relative_features @ (relative_weights * (np.var(features, axis=(0,1)) @ relative_var_weights)) 
-    #     return np.exp(e1 - e2)
-
-    def __variance_weighting(self, features, weights, var_weights):
-        return -1*features @ (weights * (np.var(features, axis=(0,1)) @ var_weights))
-
-    def __local(self, features, weights):
-        return np.exp(-features @ weights)
-
-    def __exponential_function(self, features, *weights):
-        weights = np.array(weights).reshape(features.shape[-1],-1)
-        return np.exp(features @ weights).flatten()
-
-    def __linear_function(self, features, *weights):
-        weights = np.array(weights).reshape(features.shape[-1],-1)
-        return (features @ weights).flatten()
-    
-    def __linear_and_log(self, features, *weights):
-        linear = np.array(weights[:len(weights)//2]).reshape(features.shape[-1],-1)
-        exp = np.array(weights[len(weights)//2:]).reshape(features.shape[-1],-1)
-        return ((features @ linear) + np.log(-features @ exp)).flatten()
-    
-    def __combined(self, features, linear, exp):
-        return ((features @ linear) + np.exp(-features @ exp)).flatten()
-
-    # def __transposed_linear_function(self, features, *weights):
-    #     # features = features.transpose()
-    #     return (weights @ features).flatten()
-    
-    def __calc(self, function, features, weights, *args, **kwargs):
-        # Tracer()()
-        dy = features.shape[0] // weights.shape[0]
-        dx = features.shape[1] // weights.shape[1]
-        
-        yr = features.shape[0] % weights.shape[0]
-        xr = features.shape[1] % weights.shape[1]
-        
-        row_numbers = [y*(dy+1) for y in range(0, yr+1)]
-        row_numbers += [y for y in range(row_numbers[-1]+dy, features.shape[0]+1,dy)]
-        
-        col_numbers = [x*(dx+1) for x in range(0, xr+1)]
-        col_numbers += [x for x in range(col_numbers[-1]+dx, features.shape[1]+1,dx)] 
-
-        output = []
-
-        for y,(y0,y1) in tqdm(enumerate(zip(row_numbers[:-1], row_numbers[1:])), total=len(row_numbers)-1, leave=False):
-            output.append([])
-            for x,(x0,x1) in enumerate(zip(col_numbers[:-1], col_numbers[1:])):
-                output[-1].append(function(features[y0:y1, x0:x1], weights[y,x], 
-                                           *[arg[y0:y1, x0:x1] if arg.shape[0:2] == features.shape[0:2] else arg[y,x] for arg in args], 
-                                           **kwargs))
-        if len(output[0][0].shape)==1:                                   
-            return np.array(output)
+        if post is None:
+            return prediction
         else:
-            return np.block(output)
-        
+            return post(prediction, *args)
+
+    def exponential_function(self, features, weights):
+        return np.exp(features @ weights)
+
+    def linear_function(self, features, weights):
+        # Tracer()()
+        return (features @ weights)
     
-def calculate_relative(features, n=1):
-    [up, right, down, left] = [np.zeros(features.shape) for i in range(4)]
-    up[n:] = np.diff(features, n=n, axis=0)
-    right[:,:-n] = np.diff(features[::-1], n=n, axis=1)[::-1]
-    down[:-n] = np.diff(features[::-1], n=n, axis=0)[::-1]
-    left[:,n:] = np.diff(features, n=n, axis=1)
-    return np.stack([up,right,down,left], axis=0)
+    def __train_function(self, function, x, *params):
+        params = np.array(params)
+        return function(x, params).flatten()

@@ -4,14 +4,18 @@ import math
 from tqdm.notebook import tqdm,trange
 from itertools import product, zip_longest
 
+from IPython.core.debugger import Tracer
+
 from depth_Functions import (
     show_array_of_images,
     show_img,
-    stand
+    stand,
+    patch_values,
+    get_neighbours
 )
 
 class Feature_array():
-    def __init__(self, image, local_function, global_function=None, patchshapes=[], blur=True, convert=None, dtype = np.float64, show=False, *args, **kwargs):
+    def __init__(self, image, local_function, patch_function=None, patchshapes=[], blur=True, convert=None, dtype = np.float64, show=False, *args, **kwargs):
         if convert is None:
             self.image = image
         else :
@@ -22,33 +26,40 @@ class Feature_array():
         self.local_function = local_function
         self.local_features = local_function(image)
         self.shape = self.local_features.shape
-        self.patchshapes = patchshapes
-        self.global_function = global_function
-        self.global_features = None
+        self.patch_function = patch_function
+        # if patch_function is not None:
+        #     self.patchshapes = patchshapes
+        #     
+        #     self.patches = [patch_values(self.local_features, patch_function, shapes) for shapes in patchshapes]
+        # else:
+        #     self.patches = None
 
-    def get_features(self):
-        if self.global_function is None:
-            return self.local_features
-        if self.global_features is None:
-            self.calc_global_features()
-        
-        return np.append(self.local_features, self.global_features.reshape((*self.local_features.shape[0:-1],-1)), axis=-1)[...,None]
+    def feature_iter(self, primary, *args, neighbours=True, patchshapes=[], columnshapes=[]):
+        features = self.local_features
+        columns = [patch_values(features, self.patch_function, ((features.shape[0]//shapes[0]),shapes[1])) for shapes in columnshapes]
+        if neighbours:
+            features = get_neighbours(features)
+        # Tracer()()
+        patches = [patch_values(features, self.patch_function, shapes) for shapes in patchshapes]
+        features = np.array_split(self.local_features, primary.shape[0])
+        # Tracer()()
+        features = zip(features,*columns,*[np.array_split(patch, primary.shape[0]) for patch in patches])
+        return zip(features, primary, *[arg if arg.shape[0]==primary.shape[0] else np.array_split(arg, primary.shape[0]) for arg in args])
 
-    
-    def calc_global_features(self, output=None, patchshapes=None, *args, **kwargs):
+    def calc_patches(self, output=None, patchshapes=None, *args, **kwargs):
         if patchshapes is None:
             patchshapes = self.patchshapes
 
         outputs = []
         for shape in patchshapes:
-            outputs.append(self.process_patches(patchshape=shape, function=self.global_function, *args, **kwargs))
+            outputs.append(self.process_patches(patchshape=shape, function=self.patch_function, *args, **kwargs))
         
-        global_features = np.stack(outputs, axis=-1)
+        patches = np.stack(outputs, axis=-1)
 
         if output is None:
-            self.global_features = global_features
+            self.patches = patches
         else:
-            output = global_features
+            output = patches
 
     def process_patches(self, patchshape=None, output=None, target=None,  function=stand, name=''):
         if target is None:

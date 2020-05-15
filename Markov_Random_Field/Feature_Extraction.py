@@ -3,6 +3,7 @@ import numpy as np
 import math
 from scipy import ndimage
 from tqdm.notebook import tqdm,trange
+from depth_Functions import stand
 
 import sys
 sys.path.append('../')
@@ -160,12 +161,15 @@ def create_patch_local_feature_vector(image, squares=True, function=np.sum):
     return np.array([function(feature) for feature in vector])
 
 
-def create_local_feature_vector(image, squares=True):
+def create_local_feature_vector(image, squares=False, std=True):
     y, cr, cb = cv2.split(image)
     
     vector = np.stack([*texture_variation(y),*haze(cr,cb),*texture_gradients(y, 30)],axis=2)
     
     if squares:
         vector = np.concatenate((vector, vector**2), axis=2)
+
+    if std:
+        vector = stand(vector)
 
     return vector

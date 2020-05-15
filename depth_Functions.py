@@ -4,8 +4,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import math
 import re
-from inspect import getsource
 from sklearn.preprocessing import StandardScaler
+from scipy.ndimage.interpolation import shift
+from inspect import getsource
 from IPython.display import Code
 
 def show_img(image, title='', axis=None, heatmap=False, depthmap=False, figsize=(8,16)):
@@ -53,11 +54,12 @@ def show_array_of_images(images, split_channels=False, image_array_shape=None,
     for i in range(len(images)-len(titles)):
         titles.append('')
 
-    if (image_array_shape[0]==1 or image_array_shape[1] == 1):
+    _,axis = plt.subplots(*image_array_shape, figsize=figsize[::-1])
+
+    if (image_array_shape[0] == 1 or image_array_shape[1] == 1):
         for index, image in enumerate(images):
-            show_img(image, title=titles[index], *args, **kwargs)
+            show_img(image, axis=axis[index], title=titles[index], *args, **kwargs)
     else:
-        _,axis = plt.subplots(*image_array_shape, figsize=figsize[::-1])
         for index, image in enumerate(images):
             show_img(image, axis=axis[int(index/image_array_shape[1])][int(index%image_array_shape[1])], 
                      title=titles[index], *args, **kwargs)
@@ -73,7 +75,6 @@ def import_raw_depth_image(path):
         buffer = f.read()
         
     image = 1-np.frombuffer(buffer, dtype="float32").reshape(int(720), -1)
-    image[image == 1] = 2
     return image
 
 def show_function(function):
@@ -89,6 +90,47 @@ def stand(array):
 
     scalar = StandardScaler()
     return scalar.fit_transform(array).reshape(shape)
+
+def updating_mean(existing, new, count):
+    existing[:] = ((existing * count) + new) / (count+1)
+
+def sum_patch(patchshape):
+        return np.ones(patchshape)
+    
+def patch_values(image, function, patchshape, stride=None):
+    if type(patchshape) == int:
+        patchshape = (patchshape, patchshape)
+    if stride is None:
+        stride = patchshape
+    elif type(stride) == int:
+        stride = (stride,stride)
+
+    kernel = function(patchshape)
+
+    start = (image.shape[0]%stride[0], image.shape[1]%stride[1])
+
+    heights  = [] if start[0]==0 else [patchshape[0]//2]
+    widths   = [] if start[1]==0 else [patchshape[0]//2]
+    heights += [y for y in range(start[0]+patchshape[0]//2,image.shape[0],stride[0])]
+    widths  += [x for x in range(start[1]+patchshape[1]//2,image.shape[1],stride[1])]
+
+    return cv2.filter2D(image, -1, kernel)[heights][:,widths]
+
+def get_neighbours(image, n=1):
+    [up, right, down, left] = [image.copy() for i in range(4)]
+    up[n:]          = image[:-n]
+    right[:,:-n]    = image[:,n:]
+    down[:-n]       = image[n:]
+    left[:,n:]      = image[:,:-n]    
+    return np.stack([image, up, right, down, left], axis=2)
+
+def calculate_relative(image, n=1):
+    [up, right, down, left] = [np.zeros(image.shape) for i in range(4)]
+    up[n:] = np.diff(image, n=n, axis=0)
+    right[:,:-n] = np.diff(image[::-1], n=n, axis=1)[::-1]
+    down[:-n] = np.diff(image[::-1], n=n, axis=0)[::-1]
+    left[:,n:] = np.diff(image, n=n, axis=1)
+    return np.stack([up,right,down,left], axis=0)
 
 # def stand(array):
 #     if isinstance(array, list):

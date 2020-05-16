@@ -8,6 +8,7 @@ from sklearn.preprocessing import StandardScaler
 from scipy.ndimage.interpolation import shift
 from inspect import getsource
 from IPython.display import Code
+from IPython.core.debugger import Tracer
 
 def show_img(image, title='', axis=None, heatmap=False, depthmap=False, figsize=(8,16)):
     if axis is None:
@@ -94,27 +95,24 @@ def stand(array):
 def updating_mean(existing, new, count):
     existing[:] = ((existing * count) + new) / (count+1)
 
-def sum_patch(patchshape):
-        return np.ones(patchshape)
-    
-def patch_values(image, function, patchshape, stride=None):
+def sum_kernel(patchshape):
     if type(patchshape) == int:
         patchshape = (patchshape, patchshape)
+    return np.ones(patchshape)
+    
+def patch_values(image, kernel, stride=None):
     if stride is None:
-        stride = patchshape
+        stride = kernel.shape
     elif type(stride) == int:
         stride = (stride,stride)
 
-    kernel = function(patchshape)
+    modulus = image.shape[1]%stride[1]
 
-    start = (image.shape[0]%stride[0], image.shape[1]%stride[1])
+    xshift = stride[1]//2 if modulus==0 else (modulus-1)//2
 
-    heights  = [] if start[0]==0 else [patchshape[0]//2]
-    widths   = [] if start[1]==0 else [patchshape[0]//2]
-    heights += [y for y in range(start[0]+patchshape[0]//2,image.shape[0],stride[0])]
-    widths  += [x for x in range(start[1]+patchshape[1]//2,image.shape[1],stride[1])]
-
-    return cv2.filter2D(image, -1, kernel)[heights][:,widths]
+    anchor = (-1,stride[0]-1)
+    # Tracer()()
+    return cv2.filter2D(image, -1, kernel, anchor=anchor, borderType=cv2.BORDER_REFLECT)[stride[0]-1::stride[0],xshift::stride[1]]
 
 def get_neighbours(image, n=1):
     [up, right, down, left] = [image.copy() for i in range(4)]

@@ -91,17 +91,3 @@ def scaled_patch(patch, patchsize, scale, function, sub=False):
         else :
             subpatches.append(function(patch[start[0]:end[0], start[1]:end[1]]))
     return subpatches
-
-
-
-# def create_global_feature_vector(patch, number_of_scales=1, *args, **kwargs):
-#     local_feature_vector = create_local_feature_vector(patch, *args, **kwargs)
-#     scale1 = np.array([local_feature_vector for i in range(5)])
-#     if number_of_scales ==1:
-#         return scale1
-
-#     return 
-
-# # def create_global_feature_vector(patch, *args, **kwargs):
-# #     local_feature_vector = create_local_feature_vector(patch, * args, **kwargs)
-# #     return [local_feature_vector for i in range(9)]

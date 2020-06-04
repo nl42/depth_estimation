@@ -93,7 +93,14 @@ def stand(array):
     return scalar.fit_transform(array).reshape(shape)
 
 def updating_mean(existing, new, count):
-    existing[:] = ((existing * count) + new) / (count+1)
+    return ((existing * count) + new) / (count+1)
+
+def iterate(primary, *args, axis=0):
+    args = [np.array_split(arg, primary.shape[0],axis=axis) for arg in args]
+    return zip(primary, *args)
+
+def sum_patches(image, patchshape, *args):
+    return patch_values(image, sum_kernel(patchshape), *args)
 
 def sum_kernel(patchshape):
     if type(patchshape) == int:
@@ -111,31 +118,4 @@ def patch_values(image, kernel, stride=None):
     xshift = stride[1]//2 if modulus==0 else (modulus-1)//2
 
     anchor = (-1,stride[0]-1)
-    # Tracer()()
     return cv2.filter2D(image, -1, kernel, anchor=anchor, borderType=cv2.BORDER_REFLECT)[stride[0]-1::stride[0],xshift::stride[1]]
-
-def get_neighbours(image, n=1):
-    [up, right, down, left] = [image.copy() for i in range(4)]
-    up[n:]          = image[:-n]
-    right[:,:-n]    = image[:,n:]
-    down[:-n]       = image[n:]
-    left[:,n:]      = image[:,:-n]    
-    return np.stack([image, up, right, down, left], axis=2)
-
-def calculate_relative(image, n=1):
-    [up, right, down, left] = [np.zeros(image.shape) for i in range(4)]
-    up[n:] = np.diff(image, n=n, axis=0)
-    right[:,:-n] = np.diff(image[::-1], n=n, axis=1)[::-1]
-    down[:-n] = np.diff(image[::-1], n=n, axis=0)[::-1]
-    left[:,n:] = np.diff(image, n=n, axis=1)
-    return np.stack([up,right,down,left], axis=0)
-
-# def stand(array):
-#     if isinstance(array, list):
-#         array = np.array(array)
-
-#     mean, std = np.mean(array, axis=(0,1)), np.std(array, axis=(0,1))
-
-#     std = [1 if s==0 else s for s in std]
-
-#     return (array - mean) / std

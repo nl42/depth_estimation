@@ -1,88 +1,112 @@
-from scipy.optimize import curve_fit 
-
-from Feature_Extraction import create_local_feature_vector
-
-from Feature_array import Feature_array
-
-from IPython.display import clear_output
-
-from tqdm.notebook import tqdm, trange
-
-from scipy.odr import ODR, Data, Model
-
 import numpy as np
 import math
 from numpy import errstate,isneginf,array
-
 import cv2
 
-from depth_Functions import updating_mean, stand
+from scipy.optimize import curve_fit 
+from IPython.display import clear_output
+from tqdm.notebook import tqdm, trange
 
 from functools import partial
 
+from Global import calc_features, calc_scales, unravel_patches
+
+from Feature_Extraction import calculate_local_features
+from depth_Functions import updating_mean, iterate
+
 from IPython.core.debugger import Tracer
 
+def least_squares(function, *args):
+    return np.concatenate([function(*subargs, primary) for primary, *subargs in tqdm(iterate(*args), total=len(args[0]), leave=False, desc='training')],axis=0)
+
+def scaled_least_squares(function, *args):
+    return [least_squares(function, *scaledargs) for scaledargs in tqdm(zip(*args), total=len(args[0]), leave=False, desc='scales')]
+            
+
 class Laplacian():
-    def __init__(self, initial_weights, local_function):
-        self.initial_weights = np.array(initial_weights)
+    def __init__(self, initial_weights, local_function, neighbours=True, patch_function=np.sum, initial_combined_weights=None, relative_scales=[(1,1)]):
+        self.initial_weights = [np.array(weights) for weights in initial_weights]
+        self.initial_combined_weights = initial_combined_weights
         self.local_function = local_function
         self.training_count=0
-        self.weights = np.ones(initial_weights.shape)
+        self.neighbours = neighbours
+        self.global_args = (patch_function, relative_scales)
 
-    def calc_features(self, image):
-        return Feature_array(image, convert=cv2.COLOR_BGR2YCrCb, local_function=self.local_function)
+    def train(self, train_images, train_labels, train_function=None, predict_function=None, prep=np.log, conc_function=updating_mean, *global_args):
+        if train_function is None:
+            train_function = self.linear_function
+        if len(global_args) == 0:
+            global_args = self.global_args
+        
+        least_squares_function = lambda x,y,params : np.array(curve_fit(partial(self.__train_function, train_function),x.reshape(-1, len(params)),y.flatten(),params)[0]).reshape(1,-1)
 
-    def train_combined(self, train_images, train_labels, *args, **kwargs):
-        combined_train_image = np.concatenate(train_images,axis=1)
-        combined_train_labels = np.concatenate(train_labels,axis=1)
-        self.train([combined_train_image], [combined_train_labels], *args, **kwargs)
-
-    def train(self, train_images, train_labels, function=None, prep=np.log, conc_function=updating_mean):
-        if function is None:
-            function = self.linear_function
-        # if prep is not None:
-        # train_labels = prep(train_labels)
-        function = partial(self.__train_function, function)
-        training_weights = []
         for image, labels in tqdm(zip(train_images, train_labels), total=len(train_images), leave=False):
-            features_array = self.calc_features(image)
             if prep is not None:
-                labels = prep(labels)
+                prept_labels = prep(labels)
+            features = self.local_function(image)
+            global_features  = calc_scales(features, self.neighbours, *global_args)
+            global_labels = calc_scales(prept_labels, False, *global_args)
             # Tracer()()
-            weights, covariance = zip(*[curve_fit(function, partial_features, partial_labels.flatten(), p0=partial_weights.flatten()) 
-                                   for partial_features, partial_weights, partial_labels in tqdm(features_array.feature_iter(self.initial_weights, labels),
-                                   total=self.weights.shape[0], leave=False, desc='local weights')])
-            # self.weights = np.array(weights)
-            conc_function(self.weights, weights, self.training_count)
-            # training_weights.append(np.array(weights))
+            
+            weights = [np.array(scaled_least_squares(least_squares_function, weights, global_features, global_labels)) for weights in self.initial_weights]
+            # Tracer()()
+            if self.training_count == 0:
+                self.weights = weights
+            else:
+                # Tracer()()
+                self.weights = [conc_function(existing, new, self.training_count) for existing, new in zip(self.weights, weights)]
+
+            if self.initial_combined_weights is not None:
+                # Tracer()()
+                predicted_patches = [scaled_least_squares(train_function, w, global_features) for w in weights]
+                predicted_images = np.stack([unravel_patches(p, image.shape[0:2]) for pred in predicted_patches for p in pred], axis=-1)
+                # predicted_images[predicted_images>1]=1
+                # Tracer()()
+                combined_weights = least_squares(least_squares_function, self.initial_combined_weights, predicted_images, labels)
+
+                if self.training_count == 0:
+                    self.combined_weights = combined_weights
+                else:
+                    conc_function(self.combined_weights, combined_weights, self.training_count)
+            # Tracer()()
+            
             self.training_count += 1
-    
-        # self.weights = np.mean(np.stack(training_weights),axis=0)
 
-    def post(image, minmax):
-        return cv2.normalize(image, None, *minmax, cv2.NORM_MINMAX)
-
-    def predict(self, image, function=None, post=None, *args):
+    def predict(self, image, post=None, neighbours=True, function=None, patch_function=np.sum, *global_args):
         if function is None:
             function = self.exponential_function
-        
-        feature_array = self.calc_features(image) 
-        prediction = np.concatenate([function(features, weights) for features, weights in feature_array.feature_iter(self.weights)])
-        
-        prediction[prediction>1] = 1
+        if len(global_args) == 0:
+            global_args = self.global_args
+
+        features = self.local_function(image)
+        global_features = calc_scales(features, self.neighbours, *global_args)
+        # Tracer()()
+        predictions = [scaled_least_squares(function, weights, global_features) for weights in self.weights]
+        predictions = [unravel_patches(p, image.shape[0:2]) for pred in predictions for p in pred]
+
+        if len(predictions)==1: 
+            final_prediction = predictions[0]
+        else:
+            # final_prediction = np.stack(predictions,axis=-1)
+            final_prediction = least_squares(self.linear_function, self.combined_weights, np.stack(predictions,axis=-1))
 
         if post is None:
-            return prediction
-        else:
-            return post(prediction, *args)
+            return final_prediction
+
+        return post(final_prediction)
+
+    # def linear_function(self, inputs):
+    #     return np.sum([f @ w for f,w in inputs], axis=0)
 
     def exponential_function(self, features, weights):
-        return np.exp(features @ weights)
-
+        return np.exp(self.linear_function(features, weights))
+    
     def linear_function(self, features, weights):
+        # features = features.reshape(-1,len(weights))
+        # weights = np.array(weights).reshape(features.shape[-1], -1)
         # Tracer()()
-        return (features @ weights)
+        return features @ weights
     
     def __train_function(self, function, x, *params):
-        params = np.array(params)
+        # params = np.array(params).reshape(x.shape[-1])
         return function(x, params).flatten()

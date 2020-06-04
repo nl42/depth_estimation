@@ -82,9 +82,9 @@ class Laplacian():
 
         features = self.local_function(image)
         global_features = calc_scales(features, self.neighbours, *global_args)
-        # Tracer()()
+#         Tracer()()
         predictions = [scaled_least_squares(function, weights, global_features) for weights in self.weights]
-        predictions = [unravel_patches(p, image.shape[0:2]) for pred in predictions for p in pred]
+        predictions = [unravel_patches(np.squeeze(p.reshape(*image.shape[0:2])), image.shape[0:2]) for pred in predictions for p in pred]
 
         if len(predictions)==1: 
             final_prediction = predictions[0]
@@ -104,9 +104,8 @@ class Laplacian():
         return np.exp(self.linear_function(features, weights))
     
     def linear_function(self, features, weights):
-        # features = features.reshape(-1,len(weights))
+        features = features.reshape(-1,len(weights))
         # weights = np.array(weights).reshape(features.shape[-1], -1)
-        # Tracer()()
         return features @ weights
     
     def __train_function(self, function, x, *params):
